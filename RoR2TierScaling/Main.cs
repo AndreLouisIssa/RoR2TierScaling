@@ -48,6 +48,12 @@ namespace RoR2TierScaling
                 orig.Invoke(items);
             };
 
+            On.RoR2.Items.ContagiousItemManager.Init += (orig) => 
+            {
+                OnContagiousItemManagerInit();
+                orig.Invoke();
+            };
+
             On.RoR2.ItemDisplayRuleSet.GenerateRuntimeValues += (orig,rules) =>
             {
                 orig.Invoke(rules);

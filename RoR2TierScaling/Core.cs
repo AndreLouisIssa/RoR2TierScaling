@@ -1,12 +1,11 @@
-﻿using RoR2;
+﻿using HarmonyLib;
 using R2API;
+using RoR2;
 using System;
-using System.Linq;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
-using HarmonyLib;
 using static RoR2TierScaling.Main;
-using static UnityEngine.UIElements.UIR.GradientSettingsAtlas;
 
 #pragma warning disable Publicizer001 // Accessing a member that was not originally public
 namespace RoR2TierScaling
@@ -74,6 +73,72 @@ namespace RoR2TierScaling
                             { keyAsset = aitem.ItemDef, displayRuleGroup = g.displayRuleGroup });
                     }
             rules.keyAssetRuleGroups = rules.keyAssetRuleGroups.AddRangeToArray(lassets.ToArray());
+        }
+
+        public static void OnContagiousItemManagerInit()
+        {
+            var key = DLC1Content.ItemRelationshipTypes.ContagiousItem;
+            if (key is null || !ItemCatalog.itemRelationships.TryGetValue(key,out var _contagions)) return;
+            var contagions = _contagions.Select(p => (p.itemDef1,p.itemDef2));
+            var newContagions = new HashSet<ItemDef.Pair>{};
+            var applicableItems = new HashSet<ItemDef>{};
+            var oldContagees = new Dictionary<ItemTier, Dictionary<ItemDef, HashSet<ItemDef>>>{ };
+            var oldContagers = new Dictionary<ItemTier, Dictionary<ItemDef, HashSet<ItemDef>>>{ };
+
+            foreach (var (a,b) in contagions)
+            {
+                if (!oldContagees.TryGetValue(a.tier, out var contagees))
+                    oldContagees[a.tier] = contagees = new Dictionary<ItemDef, HashSet<ItemDef>>{ };
+                if (!contagees.TryGetValue(b, out var contagee))
+                    contagees[b] = contagee = new HashSet<ItemDef>{ };
+                contagee.Add(a);
+
+                if (!oldContagers.TryGetValue(b.tier, out var contagers))
+                    oldContagers[b.tier] = contagers = new Dictionary<ItemDef, HashSet<ItemDef>>{ };
+                if (!contagers.TryGetValue(a, out var contager))
+                    contagers[a] = contager = new HashSet<ItemDef>{ };
+                contager.Add(b);
+
+                applicableItems.Add(a);
+                applicableItems.Add(b);
+            }
+
+            var alternatesByTier = new Dictionary<ItemTier, Dictionary<ItemDef, ItemDef>>();
+
+            foreach (var i in applicableItems)
+            {
+                if (!alternates.TryGetValue(i, out var aitems)) break;
+                var items = aitems.Select(a => a.ItemDef).AddItem(i);
+                foreach (var a in items) foreach (var b in items)
+                { 
+                    if (!alternatesByTier.TryGetValue(a.tier,out var bitems))
+                        alternatesByTier[a.tier] = bitems = new Dictionary<ItemDef, ItemDef>();
+                    bitems[b] = a;
+                }
+                   
+            }
+            void addContagion(ItemDef a, ItemDef b)
+            {
+                newContagions.Add(new ItemDef.Pair(){itemDef1 = a, itemDef2 = b});
+            }
+
+            foreach (var c in oldContagees) foreach (var cc in c.Value)
+            {
+                var contager = cc.Key; var contagees = cc.Value;
+                var alts = alternatesByTier[c.Key];
+                foreach (var contagee in contagees)
+                    addContagion(contagee,alts[contager]);
+            }
+
+            foreach (var c in oldContagers) foreach (var cc in c.Value)
+            {
+                var contagee = cc.Key; var contagers = cc.Value;
+                var alts = alternatesByTier[c.Key];
+                foreach (var contager in contagers)
+                    addContagion(alts[contagee],contager);
+            }
+
+            ItemCatalog.itemRelationships[key] = newContagions.ToArray();
         }
 
         public static int OnGetItemCount(Inventory inv, ItemDef item)
@@ -168,6 +233,7 @@ namespace RoR2TierScaling
 
             foreach(var t in tiers.Where(t => t.Value != tier))
             {
+                item.tags = item.tags.Where(i => i != ItemTag.WorldUnique).ToArray();
                 var aitem = MakeAlternateItem(t.Value, t.Key, item, rules);
                 if (aitem != null) aitems.Add(aitem);
             }

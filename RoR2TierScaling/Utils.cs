@@ -32,7 +32,7 @@ namespace RoR2TierScaling
             rt.filterMode = FilterMode.Point;
             RenderTexture.active = rt;
             Graphics.Blit(texture, rt);
-            Texture2D texture2 = new Texture2D((int)rect.width, (int)rect.height);
+            Texture2D texture2 = new Texture2D((int)rect.width, (int)rect.height, TextureFormat.RGBA32, false);
             texture2.ReadPixels(new Rect(rect.x, texture.height - rect.height - rect.y, rect.width, rect.height), 0, 0);
             texture2.Apply();
             RenderTexture.active = null;

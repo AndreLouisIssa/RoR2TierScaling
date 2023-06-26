@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using HarmonyLib;
 using static RoR2TierScaling.Main;
+using static UnityEngine.UIElements.UIR.GradientSettingsAtlas;
 
 #pragma warning disable Publicizer001 // Accessing a member that was not originally public
 namespace RoR2TierScaling
@@ -26,6 +27,11 @@ namespace RoR2TierScaling
             { ItemTier.Lunar, 7 }, { ItemTier.NoTier, 8 },
             { ItemTier.Tier3, 15 }, { ItemTier.VoidTier3, 16 }
         };
+
+        public static double GetScaling(ItemTier tier, ItemTier atier)
+        {
+            return scaling[atier] / scaling[tier];
+        }
 
         public static ItemTier ItemTierIndex(ItemTierDef tier)
         {
@@ -77,7 +83,7 @@ namespace RoR2TierScaling
             {
                 doOriginalItemCount = true;
                 foreach (var aitem in aitems.Select(i => i.ItemDef))
-                    subcount += inv.GetItemCount(aitem) * scaling[aitem.tier]/scaling[item.tier];
+                    subcount += inv.GetItemCount(aitem) * GetScaling(item.tier,aitem.tier);
                 doOriginalItemCount = false;
             }    
             return (int)subcount + ((subcount % 1) > random.NextDouble() ? 1 : 0);    
@@ -134,19 +140,16 @@ namespace RoR2TierScaling
                 aitem.ItemDef.requiredExpansion = item.requiredExpansion;
 
                 var color = tierColors[itier];
-
-                texture = Stain(texture,color);
-                sprite = Sprite.CreateSprite(texture,sprite.textureRect, sprite.pivot,
-                sprite.pixelsPerUnit, 0, SpriteMeshType.FullRect, sprite.border, false);
-                
-                aitem.ItemDef.pickupIconSprite = sprite;
-                aitem.ItemDef.pickupModelPrefab = item.pickupModelPrefab;
+            texture = Stain(texture,color);
+            sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
+            aitem.ItemDef.pickupIconSprite = sprite;
+            aitem.ItemDef.pickupModelPrefab = item.pickupModelPrefab;
             });
 
             delayedLanguage.Add(token,() => {
                 delayedLanguage.Remove(aitem.ItemDef.nameToken);
-                LanguageAPI.AddOverlay(aitem.ItemDef.nameToken, Language.GetString(item.nameToken) + $" ({itier})");
-                var extra = string.Format(extraDescription, 100*scaling[itier]);
+                LanguageAPI.AddOverlay(aitem.ItemDef.nameToken, Language.GetString(item.nameToken) + $" {itier}");
+                var extra = string.Format(extraDescription, (int)(10000*scaling[itier]/scaling[item.tier])/100f);
                 LanguageAPI.AddOverlay(aitem.ItemDef.pickupToken, Language.GetString(item.pickupToken) + extra);
                 LanguageAPI.AddOverlay(aitem.ItemDef.descriptionToken, Language.GetString(item.descriptionToken) + extra);
             });

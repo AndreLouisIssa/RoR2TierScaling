@@ -7,6 +7,7 @@ using System.Security.Permissions;
 using static RoR2TierScaling.Core;
 using System;
 using System.Linq;
+using HarmonyLib;
 
 #pragma warning disable CS0618 // Type or member is obsolete
 [assembly: SecurityPermission( SecurityAction.RequestMinimum, SkipVerification = true )]
@@ -65,9 +66,10 @@ namespace RoR2TierScaling
 
             On.RoR2.Inventory.GetItemCount_ItemDef += (orig, inv, item) =>
             {
-                var count = orig.Invoke(inv,item);
-                if (doOriginalItemCount || item == null) return count;
-                return count + OnGetItemCount(inv, item);
+                if (item == null) return orig.Invoke(inv,item);
+                if (doOriginalItemCount) return orig.Invoke(inv,item);
+                if (alternate.Contains(item)) return 0;
+                return orig.Invoke(inv,item) + OnGetItemCount(inv, item);
             };
 
             On.RoR2.Inventory.RemoveItem_ItemDef_int += (orig, inv, item, amount) =>
@@ -76,14 +78,26 @@ namespace RoR2TierScaling
                     && alternates.TryGetValue(item, out var aitems))
                 {
                     doOriginalItemCount = true;
-                    int i, d;
-                    foreach (var aitem in aitems.Select(a => a.ItemDef))
-                        if ((i = inv.GetItemCount(item)) < amount 
-                            && inv.GetItemCount(aitem) >= (d = amount - i))
+                    var items = aitems.Select(a => a.ItemDef).AddItem(item).Select(a => (a,GetScaling(item.tier,a.tier)))
+                        .OrderByDescending(t => t.Item2).ToList();
+                    double count = inv.GetItemCount(item);
+                    double target = count - amount;
+                    foreach (var (i,s) in items) {
+                        double p = Math.Min(1,1/s);
+                        double a = Math.Max(1,1/s);
+                        double c;
+                        while (count > target && (c=inv.GetItemCount(i)) > 0)
                         {
-                            orig.Invoke(inv, item, i);
-                            orig.Invoke(inv, aitem, d);
+                            if (p <= random.NextDouble())
+                            {
+                                doOriginalItemCount = false;
+                                return;
+                            }
+                            var d = (int)Math.Min(c,a);
+                            orig.Invoke(inv,i,d);
+                            count -= d*s;
                         }
+                    }
                     doOriginalItemCount = false;
                 }
                 else orig.Invoke(inv, item, amount);

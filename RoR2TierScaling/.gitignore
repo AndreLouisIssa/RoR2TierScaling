@@ -1,0 +1,10 @@
+# Specify filepatterns you want git to ignore.
+
+.vs/
+obj/
+bin/
+libs/
+BepInEx/
+Managed/
+Optional/
+Publicized/

@@ -1,0 +1,11 @@
+{
+    "name": "RoR2TierScaling",
+    "version_number": "1.0.0",
+    "website_url": "https://github.com/AndreLouisIssa/RoR2TierScaling",
+    "description": "Scaled variants of each item for each tier.",
+    "dependencies": [
+      "RiskofThunder-R2API_Items-1.0.3",
+      "RiskofThunder-R2API_Language-1.0.1",
+	  "RiskofThunder-HookGenPatcher-1.2.3"
+    ]
+}

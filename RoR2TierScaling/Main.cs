@@ -78,6 +78,20 @@ namespace RoR2TierScaling
                 return orig.Invoke(inv,item) + OnGetItemCount(inv, item);
             };
 
+            On.RoR2.ColorCatalog.GetColor += (orig, i) => 
+            {
+                var color = orig.Invoke(i);
+                if (altColorCatalog.TryGetValue(i,out var color2)) return color2;
+                return color;
+            };
+
+            On.RoR2.ColorCatalog.GetColorHexString += (orig, i) => 
+            {
+                var color = orig.Invoke(i);
+                if (altColorCatalogHex.TryGetValue(i,out var color2)) return color2;
+                return color;
+            };
+
             On.RoR2.Inventory.RemoveItem_ItemDef_int += (orig, inv, item, amount) =>
             {
                 if (!doOriginalItemCount && item != null 

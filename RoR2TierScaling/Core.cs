@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using static RoR2TierScaling.Main;
+using static RoR2.ColorCatalog;
 
 #pragma warning disable Publicizer001 // Accessing a member that was not originally public
 namespace RoR2TierScaling
@@ -14,8 +15,11 @@ namespace RoR2TierScaling
     {
         public static HashSet<ItemDef> alternate = new HashSet<ItemDef>();
         public static Dictionary<ItemTier, Color> tierColors = new Dictionary<ItemTier, Color>();
+        public static Dictionary<ItemTier, Color> tierAltColors = new Dictionary<ItemTier, Color>();
         public static Dictionary<string, ItemDef> alternateTokens = new Dictionary<string, ItemDef>();
         public static Dictionary<ItemTier, ItemTierDef> tiers = new Dictionary<ItemTier, ItemTierDef>();
+        public static Dictionary<ColorIndex, Color32> altColorCatalog = new Dictionary<ColorIndex, Color32>();
+        public static Dictionary<ColorIndex, string> altColorCatalogHex = new Dictionary<ColorIndex, string>();
         public static Dictionary<ItemDef, List<CustomItem>> alternates = new Dictionary<ItemDef, List<CustomItem>>();
 
         public static Dictionary<ItemTier,double> scaling = new Dictionary<ItemTier, double>()
@@ -68,10 +72,8 @@ namespace RoR2TierScaling
             foreach (var g in rules.keyAssetRuleGroups)
                 if (g.keyAsset is ItemDef item && alternates.TryGetValue(item, out var aitems))
                     foreach(var aitem in aitems)
-                    {
                         lassets.Add(new ItemDisplayRuleSet.KeyAssetRuleGroup()
                             { keyAsset = aitem.ItemDef, displayRuleGroup = g.displayRuleGroup });
-                    }
             rules.keyAssetRuleGroups = rules.keyAssetRuleGroups.AddRangeToArray(lassets.ToArray());
         }
 
@@ -187,12 +189,6 @@ namespace RoR2TierScaling
             var _suffixB = suffixB + itier.ToString().ToUpper();
             var token = item.nameToken + _suffixB;
 
-            var sprite = item.pickupIconSprite;
-            var texture = sprite.texture.ToReadable();
-
-            if (!tierColors.ContainsKey(item.tier))
-                tierColors[item.tier] = Border(texture.GetPixel(0,0));
-
             var aitem = new CustomItem(
                 item.name + _suffixA, token, item.descriptionToken + _suffixB,
                 item.loreToken, item.pickupToken + _suffixB, item.pickupIconSprite, 
@@ -205,15 +201,19 @@ namespace RoR2TierScaling
                 aitem.ItemDef.requiredExpansion = item.requiredExpansion;
 
                 var color = tierColors[itier];
-            texture = Stain(texture,color);
-            sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
-            aitem.ItemDef.pickupIconSprite = sprite;
-            aitem.ItemDef.pickupModelPrefab = item.pickupModelPrefab;
+
+                var sprite = item.pickupIconSprite;
+                var texture = sprite.texture.ToReadable();
+
+                texture = Stain(texture,color);
+                sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
+                aitem.ItemDef.pickupIconSprite = sprite;
+                aitem.ItemDef.pickupModelPrefab = item.pickupModelPrefab;
             });
 
             delayedLanguage.Add(token,() => {
                 delayedLanguage.Remove(aitem.ItemDef.nameToken);
-                LanguageAPI.AddOverlay(aitem.ItemDef.nameToken, Language.GetString(item.nameToken) + $" {itier}");
+                LanguageAPI.AddOverlay(aitem.ItemDef.nameToken, Language.GetString(item.nameToken) + $" as {tier.name}");
                 var extra = string.Format(extraDescription, (int)(10000*scaling[itier]/scaling[item.tier])/100f);
                 LanguageAPI.AddOverlay(aitem.ItemDef.pickupToken, Language.GetString(item.pickupToken) + extra);
                 LanguageAPI.AddOverlay(aitem.ItemDef.descriptionToken, Language.GetString(item.descriptionToken) + extra);
@@ -222,12 +222,74 @@ namespace RoR2TierScaling
             return aitem;
         }
 
+        public static Color stain = Color.Lerp(new Color(0.4f,0.1f,0.7f),Color.white,0.5f).gamma;
+        public static Color lastStain = Color.white;
+
         public static List<CustomItem> MakeAlternateItems(ItemDef item, ItemDisplayRule[] rules = null)
         {
             if (item.hidden) return null;
             if (item.tier == ItemTier.NoTier) return null;
             if (item.tier == ItemTier.AssignedAtRuntime) return null;
             if (!tiers.TryGetValue(item.tier, out var tier)) return null;
+
+            var sprite = item.pickupIconSprite;
+            var texture = sprite.texture.ToReadable();
+
+            if (!tierColors.ContainsKey(item.tier))
+                tierColors[item.tier] = Border(texture.GetPixel(0,0));
+
+            if (tier.colorIndex == ColorIndex.VoidItem)
+            {
+                if (!tierAltColors.TryGetValue(item.tier, out var color))
+                {
+                    var bname = tier.name.ToLower().Replace("void","");
+                    var btier = tiers.Select(t=>new Tuple<ItemTier,ItemTierDef>(t.Key,t.Value))
+                        .FirstOrDefault(t => t.Item2.name.ToLower() == bname);
+
+                    if (btier is null)
+                    {
+                        color = tierColors[item.tier];
+                        color = color.RGBMultiplied(lastStain);
+                        lastStain = lastStain.RGBMultiplied(stain);
+                    }
+                    else
+                    {
+                        color = tierColors[btier.Item1];
+                        color = color.gamma.RGBMultiplied(stain).linear;
+                    }
+
+                    tierAltColors[item.tier] = tierColors[item.tier] = color;
+
+                    tier.bgIconTexture = tier.bgIconTexture.Duplicate(
+                        (x,y,c) => c.gamma.Grayscale().RGBMultiplied(color));
+
+                    Color icolor = GetColor(tier.colorIndex);
+                    icolor = icolor.gamma.Grayscale().RGBMultiplied(color);
+                    var hex = ColorUtility.ToHtmlStringRGB( icolor );
+                    //indexToColor32[(int)tier.colorIndex] = icolor;
+                    //indexToHexString[(int)tier.colorIndex] = ColorUtility.ToHtmlStringRGB( icolor );
+                    tier.colorIndex = (ColorIndex)indexToColor32.Length;
+                    altColorCatalog[tier.colorIndex] = icolor;
+                    altColorCatalogHex[tier.colorIndex] = hex;
+                    indexToColor32 = indexToColor32.AddItem(icolor).ToArray();
+                    indexToHexString = indexToHexString.AddItem(hex).ToArray();
+                    
+                    icolor = GetColor(tier.darkColorIndex);
+                    icolor = icolor.gamma.Grayscale().RGBMultiplied(color);
+                    hex = ColorUtility.ToHtmlStringRGB( icolor );
+                    //indexToColor32[(int)tier.darkColorIndex] = icolor;
+                    //indexToHexString[(int)tier.darkColorIndex] = ColorUtility.ToHtmlStringRGB( icolor );
+                    tier.darkColorIndex = (ColorIndex)indexToColor32.Length;
+                    altColorCatalog[tier.darkColorIndex] = icolor;
+                    altColorCatalogHex[tier.darkColorIndex] = hex;
+                    indexToColor32 = indexToColor32.AddItem(icolor).ToArray();
+                    indexToHexString = indexToHexString.AddItem(hex).ToArray();
+                }
+                  
+                texture = Stain(texture,color);
+                sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
+                item.pickupIconSprite = sprite;
+            }
 
             var aitems = new List<CustomItem>();
 

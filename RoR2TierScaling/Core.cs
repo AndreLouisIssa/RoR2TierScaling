@@ -7,6 +7,7 @@ using System.Linq;
 using UnityEngine;
 using static RoR2TierScaling.Main;
 using static RoR2.ColorCatalog;
+using UnityEngine.UIElements;
 
 #pragma warning disable Publicizer001 // Accessing a member that was not originally public
 namespace RoR2TierScaling
@@ -22,18 +23,28 @@ namespace RoR2TierScaling
         public static Dictionary<ColorIndex, string> altColorCatalogHex = new Dictionary<ColorIndex, string>();
         public static Dictionary<ItemDef, List<CustomItem>> alternates = new Dictionary<ItemDef, List<CustomItem>>();
 
-        public static Dictionary<ItemTier,double> scaling = new Dictionary<ItemTier, double>()
+        public static double defaultTierScaling = 1/4;//0;
+        public static Dictionary<ItemTier,double> tierScaling = new Dictionary<ItemTier, double>()//;
         {
-            { ItemTier.Tier1, 1 }, { ItemTier.VoidTier1, 2 },
-            { ItemTier.Tier2, 3 }, { ItemTier.VoidTier2, 4 },
-            { ItemTier.Boss, 5 }, { ItemTier.VoidBoss, 6 },
-            { ItemTier.Lunar, 7 }, { ItemTier.NoTier, 8 },
-            { ItemTier.Tier3, 15 }, { ItemTier.VoidTier3, 16 }
+            { ItemTier.Tier1, 1/1 }, { ItemTier.VoidTier1, 1/2 },
+            { ItemTier.Tier2, 1/3 }, { ItemTier.VoidTier2, 1/4 },
+            { ItemTier.Boss, 1/5 }, { ItemTier.VoidBoss, 1/6 },
+            { ItemTier.Lunar, 1/7 }, { ItemTier.NoTier, 1/8 },
+            { ItemTier.Tier3, 1/15 }, { ItemTier.VoidTier3, 1/16 }
         };
 
-        public static double GetScaling(ItemTier tier, ItemTier atier)
+        public static double GetScaling(ItemTier tier)
         {
-            return scaling[atier] / scaling[tier];
+            if (!tierScaling.TryGetValue(tier,out var scaling))
+                return tierScaling[tier] = defaultTierScaling;
+            return scaling;
+        }
+
+        public static double? GetScaling(ItemTier tier, ItemTier atier)
+        {
+            var a = GetScaling(tier); var b = GetScaling(atier);
+            if (a == 0 || b == 0) return null;
+            return a / b;
         }
 
         public static ItemTier ItemTierIndex(ItemTierDef tier)
@@ -149,8 +160,11 @@ namespace RoR2TierScaling
             if (alternates.TryGetValue(item, out var aitems))
             {
                 doOriginalItemCount = true;
-                foreach (var aitem in aitems.Select(i => i.ItemDef))
-                    subcount += inv.GetItemCount(aitem) * GetScaling(item.tier,aitem.tier);
+                int count; double? scaling;
+                foreach (var aitem in aitems.Select(i => i.ItemDef)) {
+                    if ((count = inv.GetItemCount(aitem)) != 0 && (scaling = GetScaling(item.tier, aitem.tier)).HasValue)
+                        subcount += count * scaling.Value;
+                }
                 doOriginalItemCount = false;
             }    
             return (int)subcount + ((subcount % 1) > random.NextDouble() ? 1 : 0);    
@@ -180,8 +194,26 @@ namespace RoR2TierScaling
             });
         }
 
+        public static void GenerateTierScaling(BasicPickupDropTable table)
+        {
+            //tierScaling[ItemTier.Tier1] = table.tier1Weight;
+            //tierScaling[ItemTier.VoidTier1] = table.voidTier1Weight;
+            //tierScaling[ItemTier.Tier2] = table.tier2Weight;
+            //tierScaling[ItemTier.VoidTier2] = table.voidTier2Weight;
+            //tierScaling[ItemTier.Tier3] = table.tier3Weight;
+            //tierScaling[ItemTier.VoidTier3] = table.voidTier3Weight;
+            //tierScaling[ItemTier.Boss] = table.bossWeight;
+            //tierScaling[ItemTier.VoidBoss] = table.voidBossWeight;
+            //tierScaling[ItemTier.Lunar] = table.lunarItemWeight;
+            Debug.LogWarning(string.Join(", ", tierScaling.Select(p => $"{p.Key}:{p.Value}")));
+            //foreach (var tier in tierScaling.Where(p => p.Value == 0).Select(p => p.Key).ToList())
+            //    tierScaling[tier] = 1;
+        }
+
         public static Dictionary<string,Action> delayedLanguage = new Dictionary<string,Action>();
-        public static string extraDescription = " <style=cIsUtility>Scaled by {0}%</style>.";
+        public static Dictionary<string,(string token, Func<string,string> adjust)> dynamicLanguage = new Dictionary<string, (string token, Func<string, string> adjust)>();
+        public static string extraDescriptionDynamic = " <style=cIsUtility>Scaled by <color=#{0}>{1}</color>%</style>.";
+        public static string extraDescription = " <style=cIsUtility>Scaled from <color=#{0}>{1}</color> to <color=#{2}>{3}</color></style>.";
 
         public static CustomItem MakeAlternateItem(ItemTierDef tier, ItemTier itier, ItemDef item, ItemDisplayRule[] rules = null)
         {
@@ -211,13 +243,23 @@ namespace RoR2TierScaling
                 aitem.ItemDef.pickupModelPrefab = item.pickupModelPrefab;
             });
 
+            var oldTier = tiers[item.tier];
+            var oldColor = GetColorHexString(oldTier.colorIndex);
+            var newColor = GetColorHexString(tier.colorIndex);
+            string scaling(string s) => s + string.Format(extraDescriptionDynamic,newColor,(int)(10000*GetScaling(item.tier,itier))/100f);
+
             delayedLanguage.Add(token,() => {
                 delayedLanguage.Remove(aitem.ItemDef.nameToken);
                 LanguageAPI.AddOverlay(aitem.ItemDef.nameToken, Language.GetString(item.nameToken) + $" as {tier.name}");
-                var extra = string.Format(extraDescription, (int)(10000*scaling[itier]/scaling[item.tier])/100f);
+
+                var extra = string.Format(extraDescription, oldColor, oldTier.name, newColor, tier.name);
                 LanguageAPI.AddOverlay(aitem.ItemDef.pickupToken, Language.GetString(item.pickupToken) + extra);
                 LanguageAPI.AddOverlay(aitem.ItemDef.descriptionToken, Language.GetString(item.descriptionToken) + extra);
             });
+
+            //dynamicLanguage.Add(aitem.ItemDef.nameToken,(item.nameToken,null));
+            dynamicLanguage.Add(aitem.ItemDef.pickupToken,(item.pickupToken,scaling));
+            dynamicLanguage.Add(aitem.ItemDef.descriptionToken,(item.descriptionToken,scaling));
 
             return aitem;
         }
@@ -264,26 +306,28 @@ namespace RoR2TierScaling
                         (x,y,c) => c.gamma.Grayscale().RGBMultiplied(color));
 
                     Color icolor = GetColor(tier.colorIndex);
-                    icolor = icolor.gamma.Grayscale().RGBMultiplied(color);
-                    var hex = ColorUtility.ToHtmlStringRGB( icolor );
-                    //indexToColor32[(int)tier.colorIndex] = icolor;
-                    //indexToHexString[(int)tier.colorIndex] = ColorUtility.ToHtmlStringRGB( icolor );
+                    icolor = icolor.RGBMultiplied(color);
+                    var hex = Util.RGBToHex( icolor );
+
                     tier.colorIndex = (ColorIndex)indexToColor32.Length;
+                    indexToColor32 = indexToColor32.AddItem(icolor).ToArray();
+                    indexToHexString = indexToHexString.AddItem(hex).ToArray();
                     altColorCatalog[tier.colorIndex] = icolor;
                     altColorCatalogHex[tier.colorIndex] = hex;
+                    //indexToColor32[(int)tier.colorIndex] = icolor;
+                    //indexToHexString[(int)tier.colorIndex] = hex;
+
+                    icolor = GetColor(tier.darkColorIndex);
+                    icolor = icolor.RGBMultiplied(color);
+                    hex = Util.RGBToHex( icolor );
+
+                    tier.darkColorIndex = (ColorIndex)indexToColor32.Length;
                     indexToColor32 = indexToColor32.AddItem(icolor).ToArray();
                     indexToHexString = indexToHexString.AddItem(hex).ToArray();
-                    
-                    icolor = GetColor(tier.darkColorIndex);
-                    icolor = icolor.gamma.Grayscale().RGBMultiplied(color);
-                    hex = ColorUtility.ToHtmlStringRGB( icolor );
-                    //indexToColor32[(int)tier.darkColorIndex] = icolor;
-                    //indexToHexString[(int)tier.darkColorIndex] = ColorUtility.ToHtmlStringRGB( icolor );
-                    tier.darkColorIndex = (ColorIndex)indexToColor32.Length;
                     altColorCatalog[tier.darkColorIndex] = icolor;
                     altColorCatalogHex[tier.darkColorIndex] = hex;
-                    indexToColor32 = indexToColor32.AddItem(icolor).ToArray();
-                    indexToHexString = indexToHexString.AddItem(hex).ToArray();
+                    //indexToColor32[(int)tier.darkColorIndex] = icolor;
+                    //indexToHexString[(int)tier.darkColorIndex] = hex;
                 }
                   
                 texture = Stain(texture,color);

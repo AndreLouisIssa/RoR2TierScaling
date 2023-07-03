@@ -34,8 +34,6 @@ namespace RoR2TierScaling
                 foreach (var t in RoR2.ContentManagement.ContentManager._itemTierDefs)
                 {
                     var i = ItemTierIndex(t);
-                    if (!scaling.ContainsKey(i))
-                        scaling[i] = scaling[ItemTier.NoTier];
                     if (i != ItemTier.NoTier)
                         tiers[i] = t;
                 }
@@ -92,6 +90,34 @@ namespace RoR2TierScaling
                 return color;
             };
 
+            //On.RoR2.BasicPickupDropTable.Add += (orig, self, indices, weight) => {
+            //    var pickups = indices.Select(PickupCatalog.GetPickupDef).GroupBy(p => p.itemTier);
+            //    var w = weight/pickups.Count();
+            //    foreach (var tier in pickups.Select(g => g.Key)) {
+            //        if (!tierScaling.TryGetValue(tier,out var scaling))
+            //            tierScaling[tier] = defaultTierScaling + w;
+            //        else tierScaling[tier] = scaling + w;
+            //    }
+            //    orig.Invoke(self, indices, weight);
+            //};
+
+            //On.RoR2.BasicPickupDropTable.GenerateWeightedSelection += (orig, self, run) => {
+            //    orig.Invoke(self, run);
+            //    GenerateTierScaling(self);
+            //};
+
+            //On.RoR2.BasicPickupDropTable.Regenerate += (orig, self, run) => {
+            //    orig.Invoke(self, run);
+            //    GenerateTierScaling(self);
+            //};
+
+            On.RoR2.Language.GetString_string += (orig,token) => {
+                if (!dynamicLanguage.TryGetValue(token, out var d) || tierScaling.Count == 0)
+                    return orig.Invoke(token);
+                var str = orig.Invoke(d.token);
+                return (d.adjust is null) ? str : d.adjust(str);
+            };
+
             On.RoR2.Inventory.RemoveItem_ItemDef_int += (orig, inv, item, amount) =>
             {
                 if (!doOriginalItemCount && item != null 
@@ -99,7 +125,7 @@ namespace RoR2TierScaling
                 {
                     doOriginalItemCount = true;
                     var items = aitems.Select(a => a.ItemDef).AddItem(item).Select(a => (a,GetScaling(item.tier,a.tier)))
-                        .OrderByDescending(t => t.Item2).ToList();
+                        .Where(p => p.Item2.HasValue).Select(p => (p.a,p.Item2.Value)).OrderByDescending(t => t.Value).ToList();
                     double count = inv.GetItemCount(item);
                     double target = count - amount;
                     foreach (var (i,s) in items) {

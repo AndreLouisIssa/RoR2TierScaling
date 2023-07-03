@@ -23,14 +23,14 @@ namespace RoR2TierScaling
         public static Dictionary<ColorIndex, string> altColorCatalogHex = new Dictionary<ColorIndex, string>();
         public static Dictionary<ItemDef, List<CustomItem>> alternates = new Dictionary<ItemDef, List<CustomItem>>();
 
-        public static double defaultTierScaling = 1/4;//0;
+        public static double defaultTierScaling = 1/8;//0;
         public static Dictionary<ItemTier,double> tierScaling = new Dictionary<ItemTier, double>()//;
         {
-            { ItemTier.Tier1, 1/1 }, { ItemTier.VoidTier1, 1/2 },
-            { ItemTier.Tier2, 1/3 }, { ItemTier.VoidTier2, 1/4 },
-            { ItemTier.Boss, 1/5 }, { ItemTier.VoidBoss, 1/6 },
-            { ItemTier.Lunar, 1/7 }, { ItemTier.NoTier, 1/8 },
-            { ItemTier.Tier3, 1/15 }, { ItemTier.VoidTier3, 1/16 }
+            { ItemTier.Tier1, 1/1f }, { ItemTier.VoidTier1, 1/2f },
+            { ItemTier.Tier2, 1/3f }, { ItemTier.VoidTier2, 1/4f },
+            { ItemTier.Boss, 1/5f }, { ItemTier.VoidBoss, 1/6f },
+            { ItemTier.Lunar, 1/7f }, { ItemTier.NoTier, 1/8f },
+            { ItemTier.Tier3, 1/15f }, { ItemTier.VoidTier3, 1/16f }
         };
 
         public static double GetScaling(ItemTier tier)
@@ -40,10 +40,10 @@ namespace RoR2TierScaling
             return scaling;
         }
 
-        public static double? GetScaling(ItemTier tier, ItemTier atier)
+        public static double GetScaling(ItemTier tier, ItemTier atier)
         {
             var a = GetScaling(tier); var b = GetScaling(atier);
-            if (a == 0 || b == 0) return null;
+            //if (a == 0 || b == 0) return default;
             return a / b;
         }
 

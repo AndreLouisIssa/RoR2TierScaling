@@ -124,8 +124,8 @@ namespace RoR2TierScaling
                     && alternates.TryGetValue(item, out var aitems))
                 {
                     doOriginalItemCount = true;
-                    var items = aitems.Select(a => a.ItemDef).AddItem(item).Select(a => (a,GetScaling(item.tier,a.tier)))
-                        .Where(p => p.Item2.HasValue).Select(p => (p.a,p.Item2.Value)).OrderByDescending(t => t.Value).ToList();
+                    var items = aitems.Select(a => a.ItemDef).AddItem(item).Select(a => 
+                        (a,GetScaling(item.tier,a.tier))).OrderByDescending(t => t.Item2).ToList();
                     double count = inv.GetItemCount(item);
                     double target = count - amount;
                     foreach (var (i,s) in items) {

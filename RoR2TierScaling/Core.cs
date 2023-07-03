@@ -7,7 +7,6 @@ using System.Linq;
 using UnityEngine;
 using static RoR2TierScaling.Main;
 using static RoR2.ColorCatalog;
-using UnityEngine.UIElements;
 
 #pragma warning disable Publicizer001 // Accessing a member that was not originally public
 namespace RoR2TierScaling
@@ -23,34 +22,34 @@ namespace RoR2TierScaling
         public static Dictionary<ColorIndex, string> altColorCatalogHex = new Dictionary<ColorIndex, string>();
         public static Dictionary<ItemDef, List<CustomItem>> alternates = new Dictionary<ItemDef, List<CustomItem>>();
 
-        public static double defaultTierScaling = 1/8;//0;
+        //public static double defaultTierScaling = 8;//0;
         public static Dictionary<ItemTier,double> tierScaling = new Dictionary<ItemTier, double>()//;
         {
-            { ItemTier.Tier1, 1/1f }, { ItemTier.VoidTier1, 1/2f },
-            { ItemTier.Tier2, 1/3f }, { ItemTier.VoidTier2, 1/4f },
-            { ItemTier.Boss, 1/5f }, { ItemTier.VoidBoss, 1/6f },
-            { ItemTier.Lunar, 1/7f }, { ItemTier.NoTier, 1/8f },
-            { ItemTier.Tier3, 1/15f }, { ItemTier.VoidTier3, 1/16f }
+            { ItemTier.Tier1, 1  }, { ItemTier.VoidTier1, 2  },
+            { ItemTier.Tier2, 3  }, { ItemTier.VoidTier2, 4  },
+            { ItemTier.Boss,  5  }, { ItemTier.VoidBoss,  6  },
+            { ItemTier.Lunar, 7  }, { ItemTier.NoTier,    8  },
+            { ItemTier.Tier3, 15 }, { ItemTier.VoidTier3, 16 }
         };
 
         public static double GetScaling(ItemTier tier)
         {
-            if (!tierScaling.TryGetValue(tier,out var scaling))
-                return tierScaling[tier] = defaultTierScaling;
-            return scaling;
+            //if (!tierScaling.TryGetValue(tier,out var scaling))
+            //    return tierScaling[tier] = defaultTierScaling;
+            return configTierScaling[tier].Value;
         }
 
         public static double GetScaling(ItemTier tier, ItemTier atier)
         {
             var a = GetScaling(tier); var b = GetScaling(atier);
             //if (a == 0 || b == 0) return default;
-            return a / b;
+            return b / a;
         }
 
         public static ItemTier ItemTierIndex(ItemTierDef tier)
         {
-            if (tier is null) return ItemTier.NoTier;
-            ItemTier i;
+            var i = ItemTier.NoTier;
+            if (tier is null) return i;
 #pragma warning disable CS0642 // Possible mistaken empty statement
             if (Enum.TryParse(tier.name.Substring(0,tier.name.Length-3), out i));
             else if (Enum.TryParse(tier.name.Substring(0,tier.name.Length-7), out i));
@@ -93,23 +92,23 @@ namespace RoR2TierScaling
             var key = DLC1Content.ItemRelationshipTypes.ContagiousItem;
             if (key is null || !ItemCatalog.itemRelationships.TryGetValue(key,out var _contagions)) return;
             var contagions = _contagions.Select(p => (p.itemDef1,p.itemDef2));
-            var newContagions = new HashSet<ItemDef.Pair>{};
-            var applicableItems = new HashSet<ItemDef>{};
-            var oldContagees = new Dictionary<ItemTier, Dictionary<ItemDef, HashSet<ItemDef>>>{ };
-            var oldContagers = new Dictionary<ItemTier, Dictionary<ItemDef, HashSet<ItemDef>>>{ };
+            var newContagions = new HashSet<ItemDef.Pair>();
+            var applicableItems = new HashSet<ItemDef>();
+            var oldContagees = new Dictionary<ItemTier, Dictionary<ItemDef, HashSet<ItemDef>>>();
+            var oldContagers = new Dictionary<ItemTier, Dictionary<ItemDef, HashSet<ItemDef>>>();
 
             foreach (var (a,b) in contagions)
             {
                 if (!oldContagees.TryGetValue(a.tier, out var contagees))
-                    oldContagees[a.tier] = contagees = new Dictionary<ItemDef, HashSet<ItemDef>>{ };
+                    oldContagees[a.tier] = contagees = new Dictionary<ItemDef, HashSet<ItemDef>>();
                 if (!contagees.TryGetValue(b, out var contagee))
-                    contagees[b] = contagee = new HashSet<ItemDef>{ };
+                    contagees[b] = contagee = new HashSet<ItemDef>();
                 contagee.Add(a);
 
                 if (!oldContagers.TryGetValue(b.tier, out var contagers))
-                    oldContagers[b.tier] = contagers = new Dictionary<ItemDef, HashSet<ItemDef>>{ };
+                    oldContagers[b.tier] = contagers = new Dictionary<ItemDef, HashSet<ItemDef>>();
                 if (!contagers.TryGetValue(a, out var contager))
-                    contagers[a] = contager = new HashSet<ItemDef>{ };
+                    contagers[a] = contager = new HashSet<ItemDef>();
                 contager.Add(b);
 
                 applicableItems.Add(a);
@@ -128,8 +127,8 @@ namespace RoR2TierScaling
                         alternatesByTier[a.tier] = bitems = new Dictionary<ItemDef, ItemDef>();
                     bitems[b] = a;
                 }
-                   
             }
+
             void addContagion(ItemDef a, ItemDef b)
             {
                 newContagions.Add(new ItemDef.Pair(){itemDef1 = a, itemDef2 = b});
@@ -160,10 +159,10 @@ namespace RoR2TierScaling
             if (alternates.TryGetValue(item, out var aitems))
             {
                 doOriginalItemCount = true;
-                int count; double? scaling;
+                int count;
                 foreach (var aitem in aitems.Select(i => i.ItemDef)) {
-                    if ((count = inv.GetItemCount(aitem)) != 0 && (scaling = GetScaling(item.tier, aitem.tier)).HasValue)
-                        subcount += count * scaling.Value;
+                    if ((count = inv.GetItemCount(aitem)) != 0)
+                        subcount += count * GetScaling(item.tier, aitem.tier);
                 }
                 doOriginalItemCount = false;
             }    
@@ -172,8 +171,8 @@ namespace RoR2TierScaling
 
         public static bool doOriginalItemCount = false;
 
-        public static string suffixA = "Alternate";
-        public static string suffixB = "_ALTERNATE_";
+        public static string suffixA = "As";
+        public static string suffixB = "_AS_";
 
         public static Color Border(Color color)
         {
@@ -194,8 +193,8 @@ namespace RoR2TierScaling
             });
         }
 
-        public static void GenerateTierScaling(BasicPickupDropTable table)
-        {
+        //public static void GenerateTierScaling(BasicPickupDropTable table)
+        //{
             //tierScaling[ItemTier.Tier1] = table.tier1Weight;
             //tierScaling[ItemTier.VoidTier1] = table.voidTier1Weight;
             //tierScaling[ItemTier.Tier2] = table.tier2Weight;
@@ -205,14 +204,14 @@ namespace RoR2TierScaling
             //tierScaling[ItemTier.Boss] = table.bossWeight;
             //tierScaling[ItemTier.VoidBoss] = table.voidBossWeight;
             //tierScaling[ItemTier.Lunar] = table.lunarItemWeight;
-            Debug.LogWarning(string.Join(", ", tierScaling.Select(p => $"{p.Key}:{p.Value}")));
+            //Debug.LogWarning(string.Join(", ", tierScaling.Select(p => $"{p.Key}:{p.Value}")));
             //foreach (var tier in tierScaling.Where(p => p.Value == 0).Select(p => p.Key).ToList())
             //    tierScaling[tier] = 1;
-        }
+        //}
 
         public static Dictionary<string,Action> delayedLanguage = new Dictionary<string,Action>();
         public static Dictionary<string,(string token, Func<string,string> adjust)> dynamicLanguage = new Dictionary<string, (string token, Func<string, string> adjust)>();
-        public static string extraDescriptionDynamic = " <style=cIsUtility>Scaled by <color=#{0}>{1}</color>%</style>.";
+        public static string extraDescriptionDynamic = " <style=cIsUtility>Scaled by <color=#{0}>{1}%</color></style>.";
         public static string extraDescription = " <style=cIsUtility>Scaled from <color=#{0}>{1}</color> to <color=#{2}>{3}</color></style>.";
 
         public static CustomItem MakeAlternateItem(ItemTierDef tier, ItemTier itier, ItemDef item, ItemDisplayRule[] rules = null)

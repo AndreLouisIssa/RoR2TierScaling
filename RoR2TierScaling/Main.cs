@@ -8,6 +8,7 @@ using static RoR2TierScaling.Core;
 using System;
 using System.Linq;
 using HarmonyLib;
+using BepInEx.Configuration;
 
 #pragma warning disable CS0618 // Type or member is obsolete
 [assembly: SecurityPermission( SecurityAction.RequestMinimum, SkipVerification = true )]
@@ -21,70 +22,96 @@ namespace RoR2TierScaling
     [BepInDependency(LanguageAPI.PluginGUID)]
     public class Main : BaseUnityPlugin
     {
-
         public static Random random;
-        public static int seed = 5042891;
+        public static ConfigEntry<int> configSeed;
+        public static ConfigEntry<bool> configRandomSeed;
+        public static ConfigEntry<double> configDefaultTierScaling;
+        public static Dictionary<ItemTier, ConfigEntry<double>> configTierScaling = new Dictionary<ItemTier, ConfigEntry<double>>();
 
         public void Awake()
         {
-            random = new Random(seed);
+            configSeed = Config.Bind(
+                "Randomness",
+                "Seed",
+                5042891,
+                "Seed to use for randomness"
+            );
 
-            On.RoR2.ItemTierCatalog.Init += (orig) =>
-            {
+            configRandomSeed = Config.Bind(
+                "Randomness",
+                "Randomise Seed",
+                false,
+                "Ignore the set seed and instead use a random one"
+            );
+
+            random = configRandomSeed.Value ? new Random() : new Random(configSeed.Value);
+
+            configDefaultTierScaling = Config.Bind(
+                "Scaling",
+                "Default Tier Weight",
+                8d,
+                "Tier weight assigned to new modded tiers"
+            );
+
+            On.RoR2.ItemTierCatalog.Init += (orig) => {
                 foreach (var t in RoR2.ContentManagement.ContentManager._itemTierDefs)
                 {
                     var i = ItemTierIndex(t);
-                    if (i != ItemTier.NoTier)
-                        tiers[i] = t;
+                    if (i is ItemTier.NoTier) continue;
+                    tiers[i] = t;
+                    if (configTierScaling.ContainsKey(i)) continue;
+                    if (!tierScaling.TryGetValue(i, out var w))
+                        w = configDefaultTierScaling.Value;
+                    var c = configTierScaling[i] = Config.Bind(
+                        "Scaling",
+                        "Tier Weight: " + t.name,
+                        w,
+                        "Tier weight of the tier internally called " + t.name
+                    );
+                    tierScaling[i] = c.Value;
                 }
                 orig.Invoke();
             };
 
-            On.RoR2.ItemCatalog.SetItemDefs += (orig, items) =>
-            {
+            On.RoR2.ItemCatalog.SetItemDefs += (orig, items) => {
                 items = OnItemCatalogSetItemDefs(items);
                 orig.Invoke(items);
             };
 
-            On.RoR2.Items.ContagiousItemManager.Init += (orig) => 
-            {
+            On.RoR2.Items.ContagiousItemManager.Init += (orig) => {
                 OnContagiousItemManagerInit();
                 orig.Invoke();
             };
 
-            On.RoR2.ItemDisplayRuleSet.GenerateRuntimeValues += (orig,rules) =>
-            {
+            On.RoR2.ItemDisplayRuleSet.GenerateRuntimeValues += (orig,rules) => {
                 orig.Invoke(rules);
                 OnGenerateRuntimeValues(rules);
             };
 
-            On.RoR2.UI.LogBook.LogBookController.BuildPickupEntries += (orig,exps) =>
-            {
-                var entries = orig.Invoke(exps); 
-                foreach (var entry in entries)
+            On.RoR2.UI.LogBook.LogBookController.BuildPickupEntries += (orig,exps) => {
+                var entries = new List<RoR2.UI.LogBook.Entry>(); 
+                foreach (var entry in orig.Invoke(exps))
                     if (alternateTokens.ContainsKey(entry.nameToken) 
                         && delayedLanguage.TryGetValue(entry.nameToken, out var action))
                         action.Invoke();
-                return entries;
+                    else entries.Add(entry);
+                return entries.ToArray();
             };
 
-            On.RoR2.Inventory.GetItemCount_ItemDef += (orig, inv, item) =>
-            {
+            On.RoR2.Inventory.GetItemCount_ItemDef += (orig, inv, item) => {
                 if (item == null) return orig.Invoke(inv,item);
                 if (doOriginalItemCount) return orig.Invoke(inv,item);
                 if (alternate.Contains(item)) return 0;
                 return orig.Invoke(inv,item) + OnGetItemCount(inv, item);
             };
 
-            On.RoR2.ColorCatalog.GetColor += (orig, i) => 
-            {
+            On.RoR2.ColorCatalog.GetColor += (orig, i) => {
                 var color = orig.Invoke(i);
                 if (altColorCatalog.TryGetValue(i,out var color2)) return color2;
                 return color;
             };
 
-            On.RoR2.ColorCatalog.GetColorHexString += (orig, i) => 
-            {
+            On.RoR2.ColorCatalog.GetColorHexString += (orig, i) => {
                 var color = orig.Invoke(i);
                 if (altColorCatalogHex.TryGetValue(i,out var color2)) return color2;
                 return color;
@@ -106,10 +133,11 @@ namespace RoR2TierScaling
             //    GenerateTierScaling(self);
             //};
 
-            //On.RoR2.BasicPickupDropTable.Regenerate += (orig, self, run) => {
-            //    orig.Invoke(self, run);
-            //    GenerateTierScaling(self);
-            //};
+            On.RoR2.BasicPickupDropTable.Regenerate += (orig, self, run) => {
+                random = configRandomSeed.Value ? new Random() : new Random(configSeed.Value);
+                orig.Invoke(self, run);
+                //GenerateTierScaling(self);
+            };
 
             On.RoR2.Language.GetString_string += (orig,token) => {
                 if (!dynamicLanguage.TryGetValue(token, out var d) || tierScaling.Count == 0)
@@ -118,8 +146,7 @@ namespace RoR2TierScaling
                 return (d.adjust is null) ? str : d.adjust(str);
             };
 
-            On.RoR2.Inventory.RemoveItem_ItemDef_int += (orig, inv, item, amount) =>
-            {
+            On.RoR2.Inventory.RemoveItem_ItemDef_int += (orig, inv, item, amount) => {
                 if (!doOriginalItemCount && item != null 
                     && alternates.TryGetValue(item, out var aitems))
                 {

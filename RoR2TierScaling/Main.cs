@@ -22,132 +22,232 @@ namespace RoR2TierScaling
     [BepInDependency(LanguageAPI.PluginGUID)]
     public class Main : BaseUnityPlugin
     {
+        // TODO:
+        // * fix ItemBehavior not correctly applying the stack count from GetItemCount
+        // * fix ItemDisplayRules not applying
+        // * test multiplayer
+        //  - properly network the random values for item stacks / keep the iterator state consistent
+        // * fix custom ColorCatalog entries
+        // * fix tier assigment of alternates for mod added tiers
+        // * fix custom colouring of mod added tiers
+        // * add artifacts for lobby / run-level config overrides
+        // * test with more diverse configs and mods
+        // * refactor to distinguish aspects other mods should be able to tweak / depend on
+
         public static Random random;
-        public static ConfigEntry<int> configSeed;
-        public static ConfigEntry<bool> configRandomSeed;
+        public static ConfigEntry<bool> configIconColours;
+        public static ConfigEntry<bool> configVoidColours;
+        public static ConfigEntry<bool> configShowLogbook;
+        public static ConfigEntry<bool> configMakeAlternates;
+        public static ConfigEntry<bool> configItemScaling;
+        public static ConfigEntry<bool> configConsumableScaling;
+        public static ConfigEntry<bool> configTieredContagion;
+        public static ConfigEntry<bool> configInvertBlacklist;
+        public static ConfigEntry<string> configItemBlacklist;
+        public static ConfigEntry<bool> configLoadReduction;
+        public static ConfigEntry<double> configLoadProportion;
+        public static ConfigEntry<int> configLoadSeed;
+        public static ConfigEntry<bool> configLoadRandomSeed;
+        public static ConfigEntry<string> configLanguage;
         public static ConfigEntry<double> configDefaultTierScaling;
         public static Dictionary<ItemTier, ConfigEntry<double>> configTierScaling = new Dictionary<ItemTier, ConfigEntry<double>>();
+        public static Dictionary<ItemTier, ConfigEntry<string>> configTierAliases = new Dictionary<ItemTier, ConfigEntry<string>>();
 
         public void Awake()
         {
-            configSeed = Config.Bind(
-                "Randomness",
-                "Seed",
-                5042891,
-                "Seed to use for randomness"
-            );
-
-            configRandomSeed = Config.Bind(
-                "Randomness",
-                "Randomise Seed",
+            configShowLogbook = Config.Bind(
+                "1. Feature Selection",
+                "Show In Logbook",
                 false,
-                "Ignore the set seed and instead use a random one"
+                "Allows the scaled variants of the items to be shown in the logbook."
             );
 
-            random = configRandomSeed.Value ? new Random() : new Random(configSeed.Value);
+            configTieredContagion = Config.Bind(
+                "1. Feature Selection",
+                "Tiered Void Corruption",
+                true,
+                "Makes void corruption transfer items within tiers instead of between them."
+            );
+
+            configIconColours = Config.Bind(
+                "1. Feature Selection",
+                "Reshaded Icon Colours",
+                true,
+                "Changes the scaled item's icon colours to match their new tier colour."
+            );
+
+            configVoidColours = Config.Bind(
+                "1. Feature Selection",
+                "Custom Void Colours",
+                true,
+                "Changes the void tiers' colours so you can tell them apart."
+            );
+
+            configMakeAlternates = Config.Bind(
+                "1. Feature Selection",
+                "Make Alternate Tiered Items",
+                true,
+                "Required for most of the mod to function, generates variants of each item for every other item tier."
+            );
+
+            configItemScaling = Config.Bind(
+                "1. Feature Selection",
+                "Item Scaling",
+                true,
+                "Based on tier, scales items so they have a chance to count as extra stacks of their original form."
+            );
+
+            configConsumableScaling = Config.Bind(
+                "1. Feature Selection",
+                "Consumable Scaling",
+                true,
+                "Based on tier, scales consumables so they have a chance to not be consumed, and scales how much is consumed at a time."
+            );
+
+            configInvertBlacklist = Config.Bind(
+                "2. Item Exceptions",
+                "Item Blacklist Is Whitelist",
+                false,
+                "Makes the item blacklist act as a whitelist instead, so only those items are included rather than excluded."
+            );
+
+            configItemBlacklist = Config.Bind(
+                "2. Item Exceptions",
+                "Item Blacklist",
+                "",
+                "Semicolon (';') separated tokens / codenames / names of items that should be excluded from tier scaling."
+            );
+
+            configLoadReduction = Config.Bind(
+                "3. Load Reduction",
+                "Load Reduction",
+                false,
+                "Reduce the number of items that get tier scaled to reduce the strain on the game"
+            );
+
+            configLoadProportion = Config.Bind(
+                "3. Load Reduction",
+                "Load Proportion",
+                1d,
+                "Proportion of items that get scaled to other tiers (between 0 and 1)."
+            );
+
+            configLoadSeed = Config.Bind(
+                "3. Load Reduction",
+                "Load Seed",
+                100000,
+                "Seed to use for randomly deciding which items to skip tier scaling for"
+            );
+
+            random = new Random(configLoadSeed.Value);
 
             configDefaultTierScaling = Config.Bind(
-                "Scaling",
+                "4. Scaling",
                 "Default Tier Weight",
-                8d,
+                0d,
                 "Tier weight assigned to new modded tiers"
             );
 
             On.RoR2.ItemTierCatalog.Init += (orig) => {
+                orig.Invoke();
                 foreach (var t in RoR2.ContentManagement.ContentManager._itemTierDefs)
                 {
                     var i = ItemTierIndex(t);
                     if (i is ItemTier.NoTier) continue;
                     tiers[i] = t;
-                    if (configTierScaling.ContainsKey(i)) continue;
-                    if (!tierScaling.TryGetValue(i, out var w))
-                        w = configDefaultTierScaling.Value;
-                    var c = configTierScaling[i] = Config.Bind(
-                        "Scaling",
-                        "Tier Weight: " + t.name,
-                        w,
-                        "Tier weight of the tier internally called " + t.name
-                    );
-                    tierScaling[i] = c.Value;
                 }
-                orig.Invoke();
             };
 
             On.RoR2.ItemCatalog.SetItemDefs += (orig, items) => {
+
+                var languages = string.Join(", ",Language.GetAllLanguages().Select(s=>s.name));
+                configLanguage = Config.Bind(
+                    "5. Language",
+                    "Language For Names",
+                    "en",
+                    "The language used to check the names of items (must be the same for all users!). Valid language options: " + languages
+                );
+
+                foreach (var (i,t) in tiers.OrderBy(p => p.Key).Select(p => (p.Key, p.Value)))
+                {
+                    if (configTierScaling.ContainsKey(i)) continue;
+                    if (!initialTierScaling.TryGetValue(i, out var w))
+                        w = configDefaultTierScaling.Value;
+                    if (!initialTierAliases.TryGetValue(i, out var a))
+                        a = t.name;
+                    var c = configTierAliases[i] = Config.Bind(
+                        "5. Language",
+                        "Tier Alias: " + t.name,
+                        a,
+                        "Custom name (must be the same for all users!) of the tier internally called " + t.name
+                    );
+                    configTierScaling[i] = Config.Bind(
+                        "4. Scaling",
+                        "Tier Weight: " + t.name,
+                        w,
+                        "Tier weight of the tier " + c.Value + ", set to 0 to disable scaling this tier"
+                    );
+                }
+
+                if (configItemBlacklist.Value.Length > 0)
+                    foreach (var p in configItemBlacklist.Value.Split(';').Select(s => s.Trim().ToLower()))
+                        excludedItems.Add(p);
+
                 items = OnItemCatalogSetItemDefs(items);
                 orig.Invoke(items);
             };
 
             On.RoR2.Items.ContagiousItemManager.Init += (orig) => {
-                OnContagiousItemManagerInit();
+                if (configTieredContagion.Value)
+                    OnContagiousItemManagerInit();
                 orig.Invoke();
             };
 
             On.RoR2.ItemDisplayRuleSet.GenerateRuntimeValues += (orig,rules) => {
-                orig.Invoke(rules);
                 OnGenerateRuntimeValues(rules);
+                orig.Invoke(rules);
             };
 
             On.RoR2.UI.LogBook.LogBookController.BuildPickupEntries += (orig,exps) => {
-                var entries = new List<RoR2.UI.LogBook.Entry>(); 
+                var skip = !configShowLogbook.Value;
+                var entries = new List<RoR2.UI.LogBook.Entry>();
                 foreach (var entry in orig.Invoke(exps))
+                { 
                     if (alternateTokens.ContainsKey(entry.nameToken) 
                         && delayedLanguage.TryGetValue(entry.nameToken, out var action))
+                    {
                         action.Invoke();
-                    else entries.Add(entry);
+                        if (skip) continue;
+                    }
+                    entries.Add(entry);
+                }
                 return entries.ToArray();
             };
 
             On.RoR2.Inventory.GetItemCount_ItemDef += (orig, inv, item) => {
                 if (item == null) return orig.Invoke(inv,item);
-                if (doOriginalItemCount) return orig.Invoke(inv,item);
+                if (!configItemScaling.Value || doOriginalItemCount) return orig.Invoke(inv,item);
                 if (alternate.Contains(item)) return 0;
                 return orig.Invoke(inv,item) + OnGetItemCount(inv, item);
             };
 
             On.RoR2.ColorCatalog.GetColor += (orig, i) => {
-                var color = orig.Invoke(i);
-                if (altColorCatalog.TryGetValue(i,out var color2)) return color2;
-                return color;
+                if (altColorCatalog.TryGetValue(i,out var color)) return color;
+                return orig.Invoke(i);
             };
 
             On.RoR2.ColorCatalog.GetColorHexString += (orig, i) => {
-                var color = orig.Invoke(i);
-                if (altColorCatalogHex.TryGetValue(i,out var color2)) return color2;
-                return color;
+                if (altColorCatalogHex.TryGetValue(i,out var color)) return color;
+                return orig.Invoke(i);
             };
 
-            //On.RoR2.BasicPickupDropTable.Add += (orig, self, indices, weight) => {
-            //    var pickups = indices.Select(PickupCatalog.GetPickupDef).GroupBy(p => p.itemTier);
-            //    var w = weight/pickups.Count();
-            //    foreach (var tier in pickups.Select(g => g.Key)) {
-            //        if (!tierScaling.TryGetValue(tier,out var scaling))
-            //            tierScaling[tier] = defaultTierScaling + w;
-            //        else tierScaling[tier] = scaling + w;
-            //    }
-            //    orig.Invoke(self, indices, weight);
-            //};
-
-            //On.RoR2.BasicPickupDropTable.GenerateWeightedSelection += (orig, self, run) => {
-            //    orig.Invoke(self, run);
-            //    GenerateTierScaling(self);
-            //};
-
-            On.RoR2.BasicPickupDropTable.Regenerate += (orig, self, run) => {
-                random = configRandomSeed.Value ? new Random() : new Random(configSeed.Value);
-                orig.Invoke(self, run);
-                //GenerateTierScaling(self);
-            };
-
-            On.RoR2.Language.GetString_string += (orig,token) => {
-                if (!dynamicLanguage.TryGetValue(token, out var d) || tierScaling.Count == 0)
-                    return orig.Invoke(token);
-                var str = orig.Invoke(d.token);
-                return (d.adjust is null) ? str : d.adjust(str);
+            On.RoR2.Run.Start += (orig,self) => {
+                random = new Random((int)self.seed);
+                orig.Invoke(self);
             };
 
             On.RoR2.Inventory.RemoveItem_ItemDef_int += (orig, inv, item, amount) => {
-                if (!doOriginalItemCount && item != null 
+                if (configConsumableScaling.Value && !doOriginalItemCount && item != null 
                     && alternates.TryGetValue(item, out var aitems))
                 {
                     doOriginalItemCount = true;

@@ -20,10 +20,14 @@ namespace RoR2TierScaling
         public static Dictionary<ItemTier, ItemTierDef> tiers = new Dictionary<ItemTier, ItemTierDef>();
         public static Dictionary<ColorIndex, Color32> altColorCatalog = new Dictionary<ColorIndex, Color32>();
         public static Dictionary<ColorIndex, string> altColorCatalogHex = new Dictionary<ColorIndex, string>();
-        public static Dictionary<ItemDef, List<CustomItem>> alternates = new Dictionary<ItemDef, List<CustomItem>>();
+        public static Dictionary<ItemDef, List<ItemDef>> alternates = new Dictionary<ItemDef, List<ItemDef>>();
         public static HashSet<string> excludedItems = new HashSet<string>();
-        public static Dictionary<string,Action> delayedLanguage = new Dictionary<string,Action>();
+        public static List<Action> delayedLanguage = new List<Action>();
         public static string extraDescriptionDynamic = " <style=cIsUtility>Scaled by <color=#{0}>{1}%</color></style>.";
+        public static ItemTag? customTag;
+        public static string customTagName = "Alternate";
+        public static string suffixA = "Alternate";
+        public static string suffixB = "_ALTERNATE_";
 
         //public static double defaultTierScaling = 8;//0;
         public static Dictionary<ItemTier,double> initialTierScaling = new Dictionary<ItemTier, double>()//;
@@ -39,9 +43,14 @@ namespace RoR2TierScaling
             { ItemTier.Tier1, "White" }, { ItemTier.VoidTier1, "Void White" },
             { ItemTier.Tier2, "Green" }, { ItemTier.VoidTier2, "Void Green" },
             { ItemTier.Boss,  "Boss"  }, { ItemTier.VoidBoss,  "Void Boss"  },
-            { ItemTier.Lunar, "Lunar" }, { ItemTier.NoTier,    "Default"   },
+            { ItemTier.Lunar, "Lunar" }, { ItemTier.NoTier,    "Default"    },
             { ItemTier.Tier3, "Red"   }, { ItemTier.VoidTier3, "Void Red"   }
         };
+
+        public static ItemTag[] GenTags(ItemTag[] tags)
+        {
+            return tags.AddItem(customTag.Value).Distinct().ToArray();
+        }
 
         public static double GetScaling(ItemTier tier)
         {
@@ -71,20 +80,43 @@ namespace RoR2TierScaling
             return i;
         }
 
+        public static void OnItemTierCatalogInit()
+        {
+            customTag = ItemAPI.AddItemTag(customTagName);
+            On.RoR2.ItemCatalog.SetItemDefs += (_orig, items) =>
+            {
+                LateOnItemCatalogSetItemDefs(items);
+                _orig.Invoke(items);
+            };
+            foreach (var t in RoR2.ContentManagement.ContentManager._itemTierDefs)
+            {
+                var i = ItemTierIndex(t);
+                if (i is ItemTier.NoTier) continue;
+                tiers[i] = t;
+            }
+        }
+
         public static ItemDef[] OnItemCatalogSetItemDefs(ItemDef[] items)
         {
             var litems = items.ToList();
             foreach (var item in items)
             {
                 var aitems = MakeAlternateItems(item)?.Where(i => ItemAPI.Add(i)).ToList();
-                if (aitems != null)
-                {
-                    alternates.Add(item, aitems);
-                    aitems.ForEach(i => alternate.Add(i.ItemDef));
-                    litems.AddRange(aitems.Select(i => i.ItemDef));
-                }
+                if (aitems != null) litems.AddRange(aitems.Select(i => i.ItemDef));
             }
             return litems.ToArray();
+        }
+
+        public static void LateOnItemCatalogSetItemDefs(ItemDef[] items)
+        {
+            // this is so other mods can mess with the items and it might still work
+            // so long as they kept the tag intact
+            var aitems = items.Where(i => i.ContainsTag(customTag.Value));
+            var nitems = items.Where(i => i.DoesNotContainTag(customTag.Value));
+            ItemDef item;
+            foreach (var aitem in aitems)
+                if (null != (item = nitems.FirstOrDefault(i => i.loreToken == aitem.loreToken)))
+                    LateMakeAlternateItem(aitem, item);
         }
 
         public static void OnGenerateRuntimeValues(ItemDisplayRuleSet rules)
@@ -94,7 +126,7 @@ namespace RoR2TierScaling
                 if (g.keyAsset is ItemDef item && alternates.TryGetValue(item, out var aitems))
                     foreach(var aitem in aitems)
                         lassets.Add(new ItemDisplayRuleSet.KeyAssetRuleGroup()
-                            { keyAsset = aitem.ItemDef, displayRuleGroup = g.displayRuleGroup });
+                            { keyAsset = aitem, displayRuleGroup = g.displayRuleGroup });
             rules.keyAssetRuleGroups = rules.keyAssetRuleGroups.AddRangeToArray(lassets.ToArray());
         }
 
@@ -139,7 +171,7 @@ namespace RoR2TierScaling
             foreach (var i in applicableItems)
             {
                 if (!alternates.TryGetValue(i, out var aitems)) break;
-                var items = aitems.Select(a => a.ItemDef).AddItem(i);
+                var items = aitems.Select(a => a).AddItem(i);
                 foreach (var a in items) foreach (var b in items)
                 { 
                     if (!alternatesByTier.TryGetValue(a.tier,out var bitems))
@@ -174,6 +206,8 @@ namespace RoR2TierScaling
             ItemCatalog.itemRelationships[key] = keepContagions.Concat(newContagions).ToArray();
         }
 
+        public static bool doOriginalItemCount = false;
+
         public static int OnGetItemCount(Inventory inv, ItemDef item)
         {
             double subcount = 0;   
@@ -181,7 +215,7 @@ namespace RoR2TierScaling
             {
                 doOriginalItemCount = true;
                 int count;
-                foreach (var aitem in aitems.Select(i => i.ItemDef)) {
+                foreach (var aitem in aitems.Select(i => i)) {
                     if ((count = inv.GetItemCount(aitem)) != 0)
                         subcount += count * GetScaling(item.tier, aitem.tier);
                 }
@@ -189,8 +223,6 @@ namespace RoR2TierScaling
             }    
             return (int)subcount + ((subcount % 1) > random.NextDouble() ? 1 : 0);    
         }
-
-        public static bool doOriginalItemCount = false;
 
         public static Color Border(Color color)
         {
@@ -220,42 +252,45 @@ namespace RoR2TierScaling
 
         public static CustomItem MakeAlternateItem(ItemTierDef tier, ItemTier itier, ItemDef item, ItemDisplayRule[] rules = null)
         {
-            var tname = configTierAliases[itier].Value;
-            var trname = tname.Replace(" ","");
-            var suffix = "_AS_" + trname.ToUpper();
+            var tname = configTierAliases[itier].Value.Replace(" ","");
+            var suffix = suffixB + tname.ToUpper();
             var token = item.nameToken + suffix;
+            var tags = GenTags(item.tags);
 
-            var aitem = new CustomItem(
-                item.name + "As" + trname, token, item.descriptionToken + suffix,
+            return new CustomItem(
+                item.name + suffixA + tname, token, item.descriptionToken + suffix,
                 item.loreToken, item.pickupToken + suffix, item.pickupIconSprite, 
-                item.pickupModelPrefab, item.tags, itier, item.hidden, 
+                item.pickupModelPrefab, tags, itier, item.hidden, 
                 item.canRemove, item.unlockableDef, rules, tier);
+        }
 
-            alternateTokens.Add(token,aitem.ItemDef);
+        public static void LateMakeAlternateItem(ItemDef aitem, ItemDef item)
+        {
+            if (!alternates.TryGetValue(item,out var aitems)) 
+                alternates[item] = aitems = new List<ItemDef>();
+            aitems.Add(aitem);
+            alternate.Add(aitem);
+            alternateTokens.Add(item.nameToken,aitem);
 
             ItemCatalog.availability.CallWhenAvailable(() => {
-                var color = tierColors[itier];
+                var color = tierColors[aitem.tier];
                 var sprite = item.pickupIconSprite;
                 var texture = sprite.texture.ToReadable();
 
                 texture = Stain(texture,color);
                 sprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.zero);
-                aitem.ItemDef.pickupIconSprite = sprite;
+                aitem.pickupIconSprite = sprite;
 
-                aitem.ItemDef.pickupModelPrefab = item.pickupModelPrefab;
-                aitem.ItemDef.requiredExpansion = item.requiredExpansion;
+                aitem.pickupModelPrefab = item.pickupModelPrefab;
+                aitem.requiredExpansion = item.requiredExpansion;
             });
 
-            delayedLanguage.Add(token,() => {
-                delayedLanguage.Remove(aitem.ItemDef.nameToken);
-
-                LanguageAPI.AddOverlay(aitem.ItemDef.nameToken, Language.GetString(item.nameToken, configLanguage.Value) + $" as {tname}");
-                var extra = string.Format(extraDescriptionDynamic,GetColorHexString(tier.colorIndex),(int)(10000*GetScaling(item.tier,itier))/100f);
-                LanguageAPI.AddOverlay(aitem.ItemDef.pickupToken, Language.GetString(item.pickupToken) + extra);
-                LanguageAPI.AddOverlay(aitem.ItemDef.descriptionToken, Language.GetString(item.descriptionToken) + extra);
+            delayedLanguage.Add(() => {
+                LanguageAPI.AddOverlay(aitem.nameToken, Language.GetString(item.nameToken, configLanguage.Value) + $" as {configTierAliases[aitem.tier].Value}");
+                var extra = string.Format(extraDescriptionDynamic,GetColorHexString(aitem._itemTierDef.colorIndex),(int)(10000*GetScaling(item.tier,aitem.tier))/100f);
+                LanguageAPI.AddOverlay(aitem.pickupToken, Language.GetString(item.pickupToken) + extra);
+                LanguageAPI.AddOverlay(aitem.descriptionToken, Language.GetString(item.descriptionToken) + extra);
             });
-
-            return aitem;
         }
 
         public static Color stain = Color.Lerp(new Color(0.4f,0.1f,0.7f),Color.white,0.5f).gamma;
@@ -284,8 +319,6 @@ namespace RoR2TierScaling
                 else border = Border(texture.GetPixel(0,0));
                 tierColors[item.tier] = border;
             }
-
-            if (!configTierScaling.TryGetValue(item.tier, out var _ts) || _ts.Value == 0) return null;
 
             if (configVoidColours.Value && tier.colorIndex == ColorIndex.VoidItem)
             {
@@ -353,18 +386,19 @@ namespace RoR2TierScaling
 
             if (!configMakeAlternates.Value) return null;
 
+            if (!configTierScaling.TryGetValue(item.tier, out var _ts) || _ts.Value == 0) return null;
+
             var lname = Language.GetString(item.nameToken, configLanguage.Value);
             var exclude = excludedItems.Contains(item.name.ToLower()) 
                 || excludedItems.Contains(item.nameToken.ToLower()) 
                 || excludedItems.Contains(lname.ToLower());
-            if (configInvertBlacklist.Value) exclude = !exclude;
-            if (exclude) return null;
+            if (exclude != configInvertBlacklist.Value) return null;
 
             if (configLoadReduction.Value && random.NextDouble() < configLoadProportion.Value) return null;
 
             var aitems = new List<CustomItem>();
 
-            foreach(var t in tiers.Where(t => t.Value != tier))
+            foreach(var t in tiers.Where(t => t.Value != tier && configTierScaling.TryGetValue(t.Key, out _ts) && _ts.Value != 0))
             {
                 item.tags = item.tags.Where(i => i != ItemTag.WorldUnique).ToArray();
                 var aitem = MakeAlternateItem(t.Value, t.Key, item, rules);

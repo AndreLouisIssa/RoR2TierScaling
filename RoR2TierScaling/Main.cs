@@ -150,12 +150,7 @@ namespace RoR2TierScaling
 
             On.RoR2.ItemTierCatalog.Init += (orig) => {
                 orig.Invoke();
-                foreach (var t in RoR2.ContentManagement.ContentManager._itemTierDefs)
-                {
-                    var i = ItemTierIndex(t);
-                    if (i is ItemTier.NoTier) continue;
-                    tiers[i] = t;
-                }
+                OnItemTierCatalogInit();
             };
 
             On.RoR2.ItemCatalog.SetItemDefs += (orig, items) => {
@@ -204,29 +199,21 @@ namespace RoR2TierScaling
             };
 
             On.RoR2.ItemDisplayRuleSet.GenerateRuntimeValues += (orig,rules) => {
-                OnGenerateRuntimeValues(rules);
+                if (configMakeAlternates.Value)
+                    OnGenerateRuntimeValues(rules);
                 orig.Invoke(rules);
             };
 
-            On.RoR2.UI.LogBook.LogBookController.BuildPickupEntries += (orig,exps) => {
-                var skip = !configShowLogbook.Value;
-                var entries = new List<RoR2.UI.LogBook.Entry>();
-                foreach (var entry in orig.Invoke(exps))
-                { 
-                    if (alternateTokens.ContainsKey(entry.nameToken) 
-                        && delayedLanguage.TryGetValue(entry.nameToken, out var action))
-                    {
-                        action.Invoke();
-                        if (skip) continue;
-                    }
-                    entries.Add(entry);
-                }
-                return entries.ToArray();
+            On.RoR2.UI.LogBook.LogBookController.BuildPickupEntries += (orig,exps) =>
+            {
+                foreach (var action in delayedLanguage) action.Invoke();
+                if (configShowLogbook.Value) return orig.Invoke(exps);
+                return orig.Invoke(exps).Where(e => !alternateTokens.ContainsKey(e.nameToken)).ToArray();
             };
 
             On.RoR2.Inventory.GetItemCount_ItemDef += (orig, inv, item) => {
-                if (item == null) return orig.Invoke(inv,item);
-                if (!configItemScaling.Value || doOriginalItemCount) return orig.Invoke(inv,item);
+                if (!configItemScaling.Value || doOriginalItemCount || item == null)
+                    return orig.Invoke(inv,item);
                 if (alternate.Contains(item)) return 0;
                 return orig.Invoke(inv,item) + OnGetItemCount(inv, item);
             };
@@ -251,7 +238,7 @@ namespace RoR2TierScaling
                     && alternates.TryGetValue(item, out var aitems))
                 {
                     doOriginalItemCount = true;
-                    var items = aitems.Select(a => a.ItemDef).AddItem(item).Select(a => 
+                    var items = aitems.AddItem(item).Select(a => 
                         (a,GetScaling(item.tier,a.tier))).OrderByDescending(t => t.Item2).ToList();
                     double count = inv.GetItemCount(item);
                     double target = count - amount;

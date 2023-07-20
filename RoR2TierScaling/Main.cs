@@ -23,6 +23,7 @@ namespace RoR2TierScaling
     public class Main : BaseUnityPlugin
     {
         // TODO:
+        // * fix formatting on some mods' descriptions?
         // * fix ItemBehavior not correctly applying the stack count from GetItemCount
         // * fix ItemDisplayRules not applying
         // * test multiplayer
@@ -149,6 +150,13 @@ namespace RoR2TierScaling
             );
 
             On.RoR2.ItemTierCatalog.Init += (orig) => {
+                On.RoR2.ItemCatalog.SetItemDefs += (_orig, items) =>
+                {
+                    _orig.Invoke(items);
+#pragma warning disable Publicizer001 // Accessing a member that was not originally public
+                    LateOnItemCatalogSetItemDefs(ItemCatalog.itemDefs);
+#pragma warning restore Publicizer001 // Accessing a member that was not originally public
+                };
                 orig.Invoke();
                 OnItemTierCatalogInit();
             };

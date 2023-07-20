@@ -109,14 +109,32 @@ namespace RoR2TierScaling
 
         public static void LateOnItemCatalogSetItemDefs(ItemDef[] items)
         {
-            // this is so other mods can mess with the items and it might still work
-            // so long as they kept the tag intact
-            var aitems = items.Where(i => i.ContainsTag(customTag.Value));
-            var nitems = items.Where(i => i.DoesNotContainTag(customTag.Value));
+            // this is so other mods can further derive items and it might still work
+            // so long as they kept the tag intact and it's possible to find the base item
+
+            var aitems = items.Where(i => !alternate.Contains(i) && i.ContainsTag(customTag.Value));
+            var nitems = items.Where(i => i.DoesNotContainTag(customTag.Value)).ToList();
+
             ItemDef item;
             foreach (var aitem in aitems)
-                if (null != (item = nitems.FirstOrDefault(i => i.loreToken == aitem.loreToken)))
-                    LateMakeAlternateItem(aitem, item);
+            {
+                // assume derived items will leave the lore unchanged
+                var loreMatched = nitems.Where(i => i.loreToken == aitem.loreToken).ToList();
+                if (loreMatched.Count == 0) continue;
+                if (loreMatched.Count == 1) item = loreMatched.First();
+                else
+                {
+                    // there may be multiple derived items, maybe they are arranged by tier?
+                    var tierMatched = loreMatched.Where(i => i.tier == aitem.tier).ToList();
+                    if (tierMatched.Count == 0) 
+                        item = loreMatched.First();
+                    item = tierMatched.First();
+                }
+
+                nitems.Remove(item);
+                LateMakeAlternateItem(aitem, item);
+            }
+                
         }
 
         public static void OnGenerateRuntimeValues(ItemDisplayRuleSet rules)
@@ -257,20 +275,28 @@ namespace RoR2TierScaling
             var token = item.nameToken + suffix;
             var tags = GenTags(item.tags);
 
-            return new CustomItem(
+            var aitem = new CustomItem(
                 item.name + suffixA + tname, token, item.descriptionToken + suffix,
                 item.loreToken, item.pickupToken + suffix, item.pickupIconSprite, 
                 item.pickupModelPrefab, tags, itier, item.hidden, 
                 item.canRemove, item.unlockableDef, rules, tier);
+
+            LateMakeAlternateItem(aitem.ItemDef, item);
+            return aitem;
         }
 
-        public static void LateMakeAlternateItem(ItemDef aitem, ItemDef item)
+        public static void RegisterAlternateItem(ItemDef aitem, ItemDef item)
         {
             if (!alternates.TryGetValue(item,out var aitems)) 
                 alternates[item] = aitems = new List<ItemDef>();
             aitems.Add(aitem);
             alternate.Add(aitem);
-            alternateTokens.Add(item.nameToken,aitem);
+            alternateTokens[aitem.nameToken] = aitem;
+        }
+
+        public static void LateMakeAlternateItem(ItemDef aitem, ItemDef item)
+        {
+            RegisterAlternateItem(aitem, item);
 
             ItemCatalog.availability.CallWhenAvailable(() => {
                 var color = tierColors[aitem.tier];
